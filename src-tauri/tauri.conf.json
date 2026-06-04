@@ -1,0 +1,32 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui-org/tauri-schema/main/schema.json",
+  "productName": "Clipboard Canvas",
+  "version": "0.1.0",
+  "identifier": "com.clipboard-canvas.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "title": "Clipboard Canvas",
+    "windows": [
+      {
+        "title": "Clipboard Canvas",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "clipboard-manager": {
+      "enable": true
+    }
+  }
+}
