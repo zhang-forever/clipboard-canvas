@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useEffect, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useReducer, useEffect, useCallback, useRef, type ReactNode } from "react";
 
 export type ClipType = "text" | "link" | "code" | "image";
 
@@ -12,6 +12,11 @@ export interface Clip {
   expanded: boolean;
   time: number;
 }
+
+/** Maximum content length per clip (100KB) */
+export const MAX_CLIP_CONTENT_LENGTH = 100_000;
+/** Maximum number of clips stored */
+export const MAX_CLIP_COUNT = 500;
 
 interface ClipState {
   clips: Clip[];
@@ -30,7 +35,7 @@ function detectType(content: string): ClipType {
   const s = content.trim();
   if (/^https?:\/\/\S+\.(png|jpg|jpeg|gif|svg|webp|bmp|ico)(\?.*)?$/i.test(s)) return "image";
   if (/^https?:\/\//i.test(s)) return "link";
-  if (/(^(function |const |let |var |import |export |class |interface |type |enum )|^[#.]include|^package |^use |^fn |^pub |^def |^<\w+[>\s]|^```|^\/\*|^\/\/|[{}(\);=<>])/m.test(s) && s.length < 2000) return "code";
+  if (/(^(function |const |let |var |import |export |class |interface |type |enum )|^[#.]include|^package |^use |^fn |^pub |^def |^<\w+[>\\s]|^```|^\/\*|^\/\/|[{}\(\);=<>])/m.test(s) && s.length < 2000) return "code";
   return "text";
 }
 
@@ -41,7 +46,7 @@ function clipReducer(state: ClipState, action: ClipAction): ClipState {
         (c) => c.content === action.clip.content && Date.now() - c.time < 5000
       );
       if (exists) return state;
-      return { clips: [action.clip, ...state.clips].slice(0, 500) };
+      return { clips: [action.clip, ...state.clips].slice(0, MAX_CLIP_COUNT) };
     }
     case "REMOVE_CLIP":
       return { clips: state.clips.filter((c) => c.id !== action.id) };
@@ -77,7 +82,22 @@ const STORAGE_KEY = "clipboard-canvas-data";
 function loadFromStorage(): Clip[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Clip[]) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // Validate and sanitize each clip
+    return parsed.filter((c: unknown): c is Clip => {
+      if (!c || typeof c !== "object") return false;
+      const obj = c as Record<string, unknown>;
+      return (
+        typeof obj.id === "string" &&
+        typeof obj.content === "string" &&
+        typeof obj.x === "number" &&
+        typeof obj.y === "number" &&
+        typeof obj.time === "number" &&
+        (obj.type === "text" || obj.type === "link" || obj.type === "code" || obj.type === "image")
+      );
+    }).slice(0, MAX_CLIP_COUNT);
   } catch {
     return [];
   }
@@ -91,6 +111,12 @@ function saveToStorage(clips: Clip[]) {
   }
 }
 
+/** Snapshot of clips for undo/redo */
+interface UndoEntry {
+  clips: Clip[];
+  description: string;
+}
+
 interface ClipContextValue {
   clips: Clip[];
   addClip: (content: string, x?: number, y?: number) => void;
@@ -99,6 +125,10 @@ interface ClipContextValue {
   pinClip: (id: string) => void;
   toggleExpand: (id: string) => void;
   clearAll: () => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 const ClipContext = createContext<ClipContextValue | null>(null);
@@ -106,17 +136,42 @@ const ClipContext = createContext<ClipContextValue | null>(null);
 export function ClipProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(clipReducer, { clips: loadFromStorage() });
 
+  // Undo/redo stacks
+  const undoStack = useRef<UndoEntry[]>([]);
+  const redoStack = useRef<UndoEntry[]>([]);
+  const lastSnapshot = useRef<string>("");
+
+  // Take a snapshot before a mutating action (for undo)
+  const snapshotForUndo = useCallback((description: string) => {
+    const current = JSON.stringify(state.clips);
+    if (current !== lastSnapshot.current) {
+      undoStack.current.push({ clips: state.clips, description });
+      lastSnapshot.current = current;
+      redoStack.current = []; // clear redo on new action
+      // Cap undo stack at 50
+      if (undoStack.current.length > 50) {
+        undoStack.current = undoStack.current.slice(-50);
+      }
+    }
+  }, [state.clips]);
+
   useEffect(() => {
     saveToStorage(state.clips);
   }, [state.clips]);
 
   const addClip = useCallback((content: string, x?: number, y?: number) => {
+    // Enforce size limit: truncate if too large
+    const trimmed = content.length > MAX_CLIP_CONTENT_LENGTH
+      ? content.slice(0, MAX_CLIP_CONTENT_LENGTH)
+      : content;
+    if (trimmed.length === 0) return;
+
     dispatch({
       type: "ADD_CLIP",
       clip: {
         id: crypto.randomUUID(),
-        type: detectType(content),
-        content,
+        type: detectType(trimmed),
+        content: trimmed,
         x: x ?? 100 + Math.random() * 500,
         y: y ?? 100 + Math.random() * 400,
         pinned: false,
@@ -126,14 +181,52 @@ export function ClipProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const removeClip = useCallback((id: string) => dispatch({ type: "REMOVE_CLIP", id }), []);
+  const removeClip = useCallback((id: string) => {
+    snapshotForUndo("Remove clip");
+    dispatch({ type: "REMOVE_CLIP", id });
+  }, [snapshotForUndo]);
+
   const moveClip = useCallback((id: string, x: number, y: number) => dispatch({ type: "MOVE_CLIP", id, x, y }), []);
+
   const pinClip = useCallback((id: string) => dispatch({ type: "PIN_CLIP", id }), []);
+
   const toggleExpand = useCallback((id: string) => dispatch({ type: "TOGGLE_EXPAND", id }), []);
-  const clearAll = useCallback(() => dispatch({ type: "CLEAR_ALL" }), []);
+
+  const clearAll = useCallback(() => {
+    snapshotForUndo("Clear all");
+    dispatch({ type: "CLEAR_ALL" });
+  }, [snapshotForUndo]);
+
+  const undo = useCallback(() => {
+    const entry = undoStack.current.pop();
+    if (!entry) return;
+    redoStack.current.push({ clips: state.clips, description: entry.description });
+    dispatch({ type: "LOAD_CLIPS", clips: entry.clips });
+  }, [state.clips]);
+
+  const redo = useCallback(() => {
+    const entry = redoStack.current.pop();
+    if (!entry) return;
+    undoStack.current.push({ clips: state.clips, description: entry.description });
+    dispatch({ type: "LOAD_CLIPS", clips: entry.clips });
+  }, [state.clips]);
 
   return (
-    <ClipContext.Provider value={{ clips: state.clips, addClip, removeClip, moveClip, pinClip, toggleExpand, clearAll }}>
+    <ClipContext.Provider
+      value={{
+        clips: state.clips,
+        addClip,
+        removeClip,
+        moveClip,
+        pinClip,
+        toggleExpand,
+        clearAll,
+        undo,
+        redo,
+        canUndo: undoStack.current.length > 0,
+        canRedo: redoStack.current.length > 0,
+      }}
+    >
       {children}
     </ClipContext.Provider>
   );

@@ -30,7 +30,9 @@ export function useCanvasTransform() {
     window.addEventListener("keyup", onUp);
 
     let last = performance.now();
+    let cancelled = false;
     const loop = (now: number) => {
+      if (cancelled) return;
       const dt = Math.min((now - last) / 16.67, 5);
       last = now;
       const k = keysRef.current;
@@ -50,6 +52,7 @@ export function useCanvasTransform() {
     const raf = requestAnimationFrame(loop);
 
     return () => {
+      cancelled = true;
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
       cancelAnimationFrame(raf);

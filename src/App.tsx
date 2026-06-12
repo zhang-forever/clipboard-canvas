@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import { useClips, getClipStats, clipsToJSON, type Clip, type ClipType } from "./store";
 import { useCanvasTransform } from "./canvas";
 
@@ -30,14 +30,255 @@ function ageLabel(ms: number): string {
   return `${Math.floor(ms / 86400000)}d ago`;
 }
 
+/**
+ * Highlight search matches in text content.
+ * Wraps matching substrings in <mark> tags.
+ */
+function highlightText(text: string, query: string): React.ReactNode[] {
+  if (!query.trim()) return [text];
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(${escaped})`, "gi");
+  const parts = text.split(regex);
+  return parts.map((part, i) =>
+    regex.test(part) ? (
+      <mark
+        key={i}
+        style={{
+          background: "rgba(234, 179, 8, 0.35)",
+          color: "#fbbf24",
+          borderRadius: 2,
+          padding: "0 1px",
+        }}
+      >
+        {part}
+      </mark>
+    ) : (
+      <span key={i}>{part}</span>
+    )
+  );
+}
+
 interface ContextMenuState {
   clipId: string;
   x: number;
   y: number;
 }
 
+// ---- Memoized Canvas Clip Card ----
+interface ClipCardProps {
+  clip: Clip;
+  isDragging: boolean;
+  isEntering: boolean;
+  isExiting: boolean;
+  searchQuery: string;
+  onStartDrag: (clip: Clip, e: React.MouseEvent) => void;
+  onContextMenu: (clip: Clip, e: React.MouseEvent) => void;
+  onToggleExpand: (id: string) => void;
+}
+
+const ClipCard = memo(function ClipCard({
+  clip,
+  isDragging,
+  isEntering,
+  isExiting,
+  searchQuery,
+  onStartDrag,
+  onContextMenu,
+  onToggleExpand,
+}: ClipCardProps) {
+  const color = TYPE_COLORS[clip.type];
+  const maxPreview = clip.expanded ? 2000 : 140;
+  const previewContent = clip.content.slice(0, maxPreview);
+  const hasMore = clip.content.length > maxPreview;
+
+  return (
+    <div
+      onMouseDown={(e) => onStartDrag(clip, e)}
+      onContextMenu={(e) => onContextMenu(clip, e)}
+      onDoubleClick={() => onToggleExpand(clip.id)}
+      style={{
+        position: "absolute",
+        left: clip.x,
+        top: clip.y,
+        width: 260,
+        minHeight: 80,
+        background: "rgba(22,22,36,0.95)",
+        backdropFilter: "blur(12px)",
+        border: `2px solid ${clip.pinned ? "#fff" : color}`,
+        borderLeft: `4px solid ${color}`,
+        borderRadius: 10,
+        padding: "12px 14px",
+        cursor: clip.pinned ? "default" : isDragging ? "grabbing" : "grab",
+        userSelect: "none",
+        boxShadow: isDragging
+          ? `0 0 24px ${color}44, 0 8px 32px rgba(0,0,0,0.5)`
+          : clip.pinned
+          ? "0 2px 12px rgba(255,255,255,0.08), 0 4px 16px rgba(0,0,0,0.3)"
+          : "0 2px 8px rgba(0,0,0,0.3)",
+        zIndex: isDragging ? 1000 : clip.pinned ? 100 : 10,
+        transition: isDragging ? "none" : "box-shadow 0.2s, transform 0.15s",
+        opacity: isExiting ? 0 : isEntering ? 0 : 1,
+        transform: isEntering ? "scale(0.8)" : isExiting ? "scale(0.9)" : "scale(1)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <span
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: 6,
+            background: `${color}22`,
+            border: `1px solid ${color}44`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 11,
+            fontWeight: 700,
+            color,
+          }}
+        >
+          {TYPE_ICONS[clip.type]}
+        </span>
+        <span style={{ fontSize: 11, color: "#666", flex: 1 }}>
+          {TYPE_LABELS[clip.type]}
+        </span>
+        <span style={{ fontSize: 10, color: "#555" }}>
+          {ageLabel(Date.now() - clip.time)}
+        </span>
+        {clip.pinned && (
+          <span style={{ fontSize: 10, color: "#fff" }} title="Pinned">&#x1f4cc;</span>
+        )}
+      </div>
+      <div
+        style={{
+          fontSize: 12,
+          lineHeight: 1.5,
+          color: "#ccc",
+          wordBreak: "break-all",
+          whiteSpace: "pre-wrap",
+          maxHeight: clip.expanded ? "none" : 40,
+          overflow: "hidden",
+          fontFamily: clip.type === "code" ? "'Fira Code', 'Cascadia Code', monospace" : "inherit",
+          background: clip.type === "code" ? "rgba(0,0,0,0.3)" : "transparent",
+          padding: clip.type === "code" ? "4px 6px" : 0,
+          borderRadius: clip.type === "code" ? 4 : 0,
+          position: "relative",
+        }}
+      >
+        {searchQuery.trim() ? highlightText(previewContent, searchQuery) : previewContent}
+        {hasMore && !clip.expanded && (
+          <span style={{ color: "#555", marginLeft: 4 }}>…</span>
+        )}
+        {clip.expanded && hasMore && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: 0,
+              left: 0,
+              right: 0,
+              height: 24,
+              background: "linear-gradient(transparent, rgba(22,22,36,0.95))",
+            }}
+          />
+        )}
+      </div>
+      {clip.expanded && hasMore && (
+        <div
+          onClick={() => onToggleExpand(clip.id)}
+          style={{ fontSize: 10, color: "#555", marginTop: 2, cursor: "pointer", textAlign: "center" }}
+        >
+          collapse
+        </div>
+      )}
+      {!clip.expanded && hasMore && (
+        <div
+          onClick={(e) => { e.stopPropagation(); onToggleExpand(clip.id); }}
+          style={{ fontSize: 10, color: color, marginTop: 2, cursor: "pointer", textAlign: "center" }}
+        >
+          expand
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ---- Memoized Grid Card ----
+interface GridCardProps {
+  clip: Clip;
+  searchQuery: string;
+  onCopy: (text: string) => void;
+  onRemove: (id: string) => void;
+  onToggleExpand: (id: string) => void;
+}
+
+const GridCard = memo(function GridCard({
+  clip,
+  searchQuery,
+  onCopy,
+  onRemove,
+  onToggleExpand,
+}: GridCardProps) {
+  const color = TYPE_COLORS[clip.type];
+  const content = clip.content.slice(0, clip.expanded ? 9999 : 80).replace(/\n/g, " ");
+
+  return (
+    <div
+      onDoubleClick={() => onToggleExpand(clip.id)}
+      style={{
+        background: "rgba(22,22,36,0.95)",
+        border: "1px solid #2a2a3a",
+        borderLeft: `3px solid ${color}`,
+        borderRadius: 8,
+        padding: "8px 12px",
+        fontSize: 12,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        transition: "background 0.15s",
+      }}
+    >
+      <span
+        style={{
+          width: 20,
+          height: 20,
+          borderRadius: 5,
+          background: `${color}22`,
+          border: `1px solid ${color}44`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 10,
+          fontWeight: 700,
+          color,
+          flexShrink: 0,
+        }}
+      >
+        {TYPE_ICONS[clip.type]}
+      </span>
+      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#aaa" }}>
+        {searchQuery.trim() ? highlightText(content, searchQuery) : content}
+      </span>
+      <span style={{ fontSize: 10, color: "#555", whiteSpace: "nowrap" }}>{ageLabel(Date.now() - clip.time)}</span>
+      <button
+        onClick={() => onCopy(clip.content)}
+        title="Copy"
+        style={{ background: "none", border: "none", color: "#666", cursor: "pointer", fontSize: 14, padding: "2px 4px" }}
+      >
+        &#x2398;
+      </button>
+      <button
+        onClick={() => onRemove(clip.id)}
+        title="Delete"
+        style={{ background: "none", border: "none", color: "#666", cursor: "pointer", fontSize: 14, padding: "2px 4px" }}
+      >
+        &#x2715;
+      </button>
+    </div>
+  );
+});
+
 function App() {
-  const { clips, addClip, removeClip, moveClip, pinClip, toggleExpand, clearAll } = useClips();
+  const { clips, addClip, removeClip, moveClip, pinClip, toggleExpand, clearAll, undo, redo, canUndo, canRedo } = useClips();
   const { transform, handleWheel, screenToWorld, resetView } = useCanvasTransform();
   const [search, setSearch] = useState("");
   const [gridView, setGridView] = useState(false);
@@ -71,23 +312,36 @@ function App() {
     return { minX: minX - pad, minY: minY - pad, maxX: maxX + pad, maxY: maxY + pad };
   }, [clips]);
 
+  // Keyboard shortcuts: ? for help, Escape to close, Ctrl+Z / Ctrl+Shift+Z for undo/redo
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
-        if (!(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
-          e.preventDefault();
-          setShowShortcuts((v) => !v);
-        }
+      const isInput = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !isInput) {
+        e.preventDefault();
+        setShowShortcuts((v) => !v);
       }
       if (e.key === "Escape") {
         setCtxMenu(null);
         if (showShortcuts) setShowShortcuts(false);
       }
+      // Undo: Ctrl+Z (not in input fields)
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey && !isInput) {
+        e.preventDefault();
+        undo();
+      }
+      // Redo: Ctrl+Shift+Z or Ctrl+Y (not in input fields)
+      if (((e.ctrlKey || e.metaKey) && e.key === "z" && e.shiftKey && !isInput) ||
+          ((e.ctrlKey || e.metaKey) && e.key === "y" && !isInput)) {
+        e.preventDefault();
+        redo();
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [showShortcuts]);
+  }, [showShortcuts, undo, redo]);
 
+  // Clipboard polling with size limit
   useEffect(() => {
     const poll = setInterval(async () => {
       try {
@@ -106,6 +360,7 @@ function App() {
     return () => clearInterval(poll);
   }, [addClip]);
 
+  // Drag handling
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       if (!dragClip || !canvasRef.current) return;
@@ -149,23 +404,26 @@ function App() {
     setCtxMenu({ clipId: clip.id, x: e.clientX, y: e.clientY });
   }, []);
 
-  const copyToClipboard = async (text: string) => {
+  const copyToClipboard = useCallback(async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
     } catch {}
     setCtxMenu(null);
-  };
+  }, []);
 
-  const removeWithAnim = (id: string) => {
+  const removeWithAnim = useCallback((id: string) => {
     setExiting((p) => new Set(p).add(id));
     setTimeout(() => {
       removeClip(id);
       setExiting((p) => { const n = new Set(p); n.delete(id); return n; });
     }, 300);
     setCtxMenu(null);
-  };
+  }, [removeClip]);
 
-  const handleExportJSON = () => {
+  // Memoized handlers for card callbacks
+  const handleToggleExpand = useCallback((id: string) => toggleExpand(id), [toggleExpand]);
+
+  const handleExportJSON = useCallback(() => {
     const json = clipsToJSON(clips);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -174,9 +432,9 @@ function App() {
     a.download = `clipboard-canvas-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  };
+  }, [clips]);
 
-  const renderMinimap = () => {
+  const renderMinimap = useCallback(() => {
     const MM_W = 160, MM_H = 100;
     const bw = clipBounds.maxX - clipBounds.minX || 1;
     const bh = clipBounds.maxY - clipBounds.minY || 1;
@@ -222,185 +480,7 @@ function App() {
         />
       </svg>
     );
-  };
-
-  const renderClipCard = (clip: Clip) => {
-    const color = TYPE_COLORS[clip.type];
-    const isDragging = dragClip === clip.id;
-    const isEntering = entering.has(clip.id);
-    const isExiting = exiting.has(clip.id);
-    const maxPreview = clip.expanded ? 2000 : 140;
-
-    return (
-      <div
-        key={clip.id}
-        onMouseDown={(e) => startDrag(clip, e)}
-        onContextMenu={(e) => handleContextMenu(clip, e)}
-        onDoubleClick={() => toggleExpand(clip.id)}
-        style={{
-          position: "absolute",
-          left: clip.x,
-          top: clip.y,
-          width: 260,
-          minHeight: 80,
-          background: "rgba(22,22,36,0.95)",
-          backdropFilter: "blur(12px)",
-          border: `2px solid ${clip.pinned ? "#fff" : color}`,
-          borderLeft: `4px solid ${color}`,
-          borderRadius: 10,
-          padding: "12px 14px",
-          cursor: clip.pinned ? "default" : isDragging ? "grabbing" : "grab",
-          userSelect: "none",
-          boxShadow: isDragging
-            ? `0 0 24px ${color}44, 0 8px 32px rgba(0,0,0,0.5)`
-            : clip.pinned
-            ? "0 2px 12px rgba(255,255,255,0.08), 0 4px 16px rgba(0,0,0,0.3)"
-            : "0 2px 8px rgba(0,0,0,0.3)",
-          zIndex: isDragging ? 1000 : clip.pinned ? 100 : 10,
-          transition: isDragging ? "none" : "box-shadow 0.2s, transform 0.15s",
-          opacity: isExiting ? 0 : isEntering ? 0 : 1,
-          transform: isEntering ? "scale(0.8)" : isExiting ? "scale(0.9)" : "scale(1)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <span
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: 6,
-              background: `${color}22`,
-              border: `1px solid ${color}44`,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 11,
-              fontWeight: 700,
-              color,
-            }}
-          >
-            {TYPE_ICONS[clip.type]}
-          </span>
-          <span style={{ fontSize: 11, color: "#666", flex: 1 }}>
-            {TYPE_LABELS[clip.type]}
-          </span>
-          <span style={{ fontSize: 10, color: "#555" }}>
-            {ageLabel(Date.now() - clip.time)}
-          </span>
-          {clip.pinned && (
-            <span style={{ fontSize: 10, color: "#fff" }} title="Pinned">&#x1f4cc;</span>
-          )}
-        </div>
-        <div
-          style={{
-            fontSize: 12,
-            lineHeight: 1.5,
-            color: "#ccc",
-            wordBreak: "break-all",
-            whiteSpace: "pre-wrap",
-            maxHeight: clip.expanded ? "none" : 40,
-            overflow: "hidden",
-            fontFamily: clip.type === "code" ? "'Fira Code', 'Cascadia Code', monospace" : "inherit",
-            background: clip.type === "code" ? "rgba(0,0,0,0.3)" : "transparent",
-            padding: clip.type === "code" ? "4px 6px" : 0,
-            borderRadius: clip.type === "code" ? 4 : 0,
-            position: "relative",
-          }}
-        >
-          {clip.content.slice(0, maxPreview)}
-          {clip.content.length > maxPreview && !clip.expanded && (
-            <span style={{ color: "#555", marginLeft: 4 }}>…</span>
-          )}
-          {clip.expanded && clip.content.length > maxPreview && (
-            <div
-              style={{
-                position: "absolute",
-                bottom: 0,
-                left: 0,
-                right: 0,
-                height: 24,
-                background: "linear-gradient(transparent, rgba(22,22,36,0.95))",
-              }}
-            />
-          )}
-        </div>
-        {clip.expanded && clip.content.length > maxPreview && (
-          <div
-            onClick={() => toggleExpand(clip.id)}
-            style={{ fontSize: 10, color: "#555", marginTop: 2, cursor: "pointer", textAlign: "center" }}
-          >
-            collapse
-          </div>
-        )}
-        {!clip.expanded && clip.content.length > maxPreview && (
-          <div
-            onClick={(e) => { e.stopPropagation(); toggleExpand(clip.id); }}
-            style={{ fontSize: 10, color: color, marginTop: 2, cursor: "pointer", textAlign: "center" }}
-          >
-            expand
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderGridCard = (clip: Clip) => {
-    const color = TYPE_COLORS[clip.type];
-    return (
-      <div
-        key={clip.id}
-        onDoubleClick={() => toggleExpand(clip.id)}
-        style={{
-          background: "rgba(22,22,36,0.95)",
-          border: `1px solid #2a2a3a`,
-          borderLeft: `3px solid ${color}`,
-          borderRadius: 8,
-          padding: "8px 12px",
-          fontSize: 12,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          transition: "background 0.15s",
-        }}
-      >
-        <span
-          style={{
-            width: 20,
-            height: 20,
-            borderRadius: 5,
-            background: `${color}22`,
-            border: `1px solid ${color}44`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 10,
-            fontWeight: 700,
-            color,
-            flexShrink: 0,
-          }}
-        >
-          {TYPE_ICONS[clip.type]}
-        </span>
-        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#aaa" }}>
-          {clip.content.slice(0, clip.expanded ? 9999 : 80).replace(/\n/g, " ")}
-        </span>
-        <span style={{ fontSize: 10, color: "#555", whiteSpace: "nowrap" }}>{ageLabel(Date.now() - clip.time)}</span>
-        <button
-          onClick={() => copyToClipboard(clip.content)}
-          title="Copy"
-          style={{ background: "none", border: "none", color: "#666", cursor: "pointer", fontSize: 14, padding: "2px 4px" }}
-        >
-          &#x2398;
-        </button>
-        <button
-          onClick={() => removeWithAnim(clip.id)}
-          title="Delete"
-          style={{ background: "none", border: "none", color: "#666", cursor: "pointer", fontSize: 14, padding: "2px 4px" }}
-        >
-          &#x2715;
-        </button>
-      </div>
-    );
-  };
+  }, [clips, clipBounds, transform]);
 
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#0a0a14", display: "flex", flexDirection: "column", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", overflow: "hidden" }}>
@@ -457,6 +537,40 @@ function App() {
             </span>
           ))}
         </div>
+
+        {/* Undo / Redo buttons */}
+        <button
+          onClick={undo}
+          disabled={!canUndo}
+          title="Undo (Ctrl+Z)"
+          style={{
+            background: canUndo ? "#1e1e30" : "transparent",
+            border: "1px solid #333",
+            borderRadius: 6,
+            color: canUndo ? "#aaa" : "#333",
+            padding: "4px 8px",
+            cursor: canUndo ? "pointer" : "default",
+            fontSize: 12,
+          }}
+        >
+          ↩
+        </button>
+        <button
+          onClick={redo}
+          disabled={!canRedo}
+          title="Redo (Ctrl+Shift+Z)"
+          style={{
+            background: canRedo ? "#1e1e30" : "transparent",
+            border: "1px solid #333",
+            borderRadius: 6,
+            color: canRedo ? "#aaa" : "#333",
+            padding: "4px 8px",
+            cursor: canRedo ? "pointer" : "default",
+            fontSize: 12,
+          }}
+        >
+          ↪
+        </button>
 
         <button
           onClick={() => setGridView(!gridView)}
@@ -526,7 +640,16 @@ function App() {
               {search ? "No clips match search." : "No clips yet. Copy something (Ctrl+C) to start."}
             </div>
           )}
-          {filtered.map(renderGridCard)}
+          {filtered.map((clip) => (
+            <GridCard
+              key={clip.id}
+              clip={clip}
+              searchQuery={search}
+              onCopy={copyToClipboard}
+              onRemove={removeWithAnim}
+              onToggleExpand={handleToggleExpand}
+            />
+          ))}
         </div>
       ) : (
         /* ---- CANVAS VIEW ---- */
@@ -551,7 +674,19 @@ function App() {
               height: 0,
             }}
           >
-            {filtered.map(renderClipCard)}
+            {filtered.map((clip) => (
+              <ClipCard
+                key={clip.id}
+                clip={clip}
+                isDragging={dragClip === clip.id}
+                isEntering={entering.has(clip.id)}
+                isExiting={exiting.has(clip.id)}
+                searchQuery={search}
+                onStartDrag={startDrag}
+                onContextMenu={handleContextMenu}
+                onToggleExpand={handleToggleExpand}
+              />
+            ))}
           </div>
 
           {/* Empty state */}
@@ -737,6 +872,8 @@ function App() {
                 ["Right-click card", "Context menu"],
                 ["? key", "Toggle this shortcuts panel"],
                 ["Escape", "Close menus / modals"],
+                ["Ctrl+Z", "Undo last deletion"],
+                ["Ctrl+Shift+Z", "Redo last undone action"],
                 ["Grid toggle", "Switch between canvas & list view"],
                 ["Export button", "Save all clips as JSON"],
               ].map(([key, desc], i) => (
