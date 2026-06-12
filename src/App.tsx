@@ -74,6 +74,10 @@ interface ClipCardProps {
   onStartDrag: (clip: Clip, e: React.MouseEvent) => void;
   onContextMenu: (clip: Clip, e: React.MouseEvent) => void;
   onToggleExpand: (id: string) => void;
+  onPin: (id: string) => void;
+  onCopy: (text: string) => void;
+  onRemove: (id: string) => void;
+  onExport: (clip: Clip) => void;
 }
 
 const ClipCard = memo(function ClipCard({
@@ -85,17 +89,24 @@ const ClipCard = memo(function ClipCard({
   onStartDrag,
   onContextMenu,
   onToggleExpand,
+  onPin,
+  onCopy,
+  onRemove,
+  onExport,
 }: ClipCardProps) {
+  const color = TYPE_COLORS[clip.type];
   const color = TYPE_COLORS[clip.type];
   const maxPreview = clip.expanded ? 2000 : 140;
   const previewContent = clip.content.slice(0, maxPreview);
   const hasMore = clip.content.length > maxPreview;
-
+  const [hovered, setHovered] = useState(false);
   return (
     <div
       onMouseDown={(e) => onStartDrag(clip, e)}
       onContextMenu={(e) => onContextMenu(clip, e)}
       onDoubleClick={() => onToggleExpand(clip.id)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         position: "absolute",
         left: clip.x,
@@ -198,6 +209,55 @@ const ClipCard = memo(function ClipCard({
           expand
         </div>
       )}
+      {/* Quick Actions */}
+      {hovered && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            display: "flex",
+            gap: 4,
+            marginTop: 6,
+            paddingTop: 6,
+            borderTop: "1px solid #2a2a3a",
+          }}
+        >
+          {[
+            { icon: "\u{1F4CC}", title: "Pin", action: () => onPin(clip.id) },
+            { icon: "\u{2398}", title: "Copy", action: () => onCopy(clip.content) },
+            { icon: "\u{1F4E5}", title: "Export", action: () => onExport(clip) },
+            { icon: "\u{2715}", title: "Delete", action: () => onRemove(clip.id), danger: true },
+          ].map((btn, i) => (
+            <button
+              key={i}
+              onClick={btn.action}
+              title={btn.title}
+              style={{
+                flex: 1,
+                background: btn.danger ? "#2a1515" : "#1a1a2a",
+                border: `1px solid ${btn.danger ? "#442222" : "#2a2a3a"}`,
+                borderRadius: 4,
+                color: btn.danger ? "#f55" : "#888",
+                padding: "3px 0",
+                cursor: "pointer",
+                fontSize: 11,
+                textAlign: "center",
+                transition: "all 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = btn.danger ? "#331111" : "#222236";
+                e.currentTarget.style.color = btn.danger ? "#f77" : "#ccc";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = btn.danger ? "#2a1515" : "#1a1a2a";
+                e.currentTarget.style.color = btn.danger ? "#f55" : "#888";
+              }}
+            >
+              {btn.icon}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 });
@@ -278,7 +338,7 @@ const GridCard = memo(function GridCard({
 });
 
 function App() {
-  const { clips, addClip, removeClip, moveClip, pinClip, toggleExpand, clearAll, undo, redo, canUndo, canRedo } = useClips();
+  const { clips, addClip, removeClip, moveClip, pinClip, toggleExpand, clearAll, undo, redo, canUndo, canRedo, autoCapture, setAutoCapture } = useClips();
   const { transform, handleWheel, screenToWorld, resetView } = useCanvasTransform();
   const [search, setSearch] = useState("");
   const [gridView, setGridView] = useState(false);
@@ -290,11 +350,18 @@ function App() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [entering, setEntering] = useState<Set<string>>(new Set());
   const [exiting, setExiting] = useState<Set<string>>(new Set());
-
+  const [categoryFilter, setCategoryFilter] = useState<ClipType | "all">("all");
   const filtered = useMemo(() => {
-    if (!search.trim()) return clips;
-    const q = search.toLowerCase();
-    return clips.filter((c) => c.content.toLowerCase().includes(q));
+    let result = clips;
+    if (categoryFilter !== "all") {
+      result = result.filter((c) => c.type === categoryFilter);
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter((c) => c.content.toLowerCase().includes(q));
+    }
+    return result;
+  }, [clips, search, categoryFilter]);
   }, [clips, search]);
 
   const stats = useMemo(() => getClipStats(clips), [clips]);
@@ -343,6 +410,7 @@ function App() {
 
   // Clipboard polling with size limit
   useEffect(() => {
+    if (!autoCapture) return;
     const poll = setInterval(async () => {
       try {
         const text = await navigator.clipboard.readText();
@@ -358,7 +426,7 @@ function App() {
       }
     }, 1000);
     return () => clearInterval(poll);
-  }, [addClip]);
+  }, [addClip, autoCapture]);
 
   // Drag handling
   useEffect(() => {
@@ -434,6 +502,16 @@ function App() {
     URL.revokeObjectURL(url);
   }, [clips]);
 
+  const handleExportClip = useCallback((clip: Clip) => {
+    const blob = new Blob([clip.content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `clip-${clip.id.slice(0, 8)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
   const renderMinimap = useCallback(() => {
     const MM_W = 160, MM_H = 100;
     const bw = clipBounds.maxX - clipBounds.minX || 1;
@@ -500,6 +578,46 @@ function App() {
         }}
       >
         <span style={{ fontWeight: 700, fontSize: 14, color: "#e0e0e0", letterSpacing: "-0.3px" }}>Clipboard Canvas</span>
+        {/* Auto-capture toggle */}
+        <button
+          onClick={() => setAutoCapture(!autoCapture)}
+          title={autoCapture ? "Auto-capture ON — click to disable" : "Auto-capture OFF — click to enable"}
+          style={{
+            background: autoCapture ? "#1a2e1a" : "#2a1515",
+            border: `1px solid ${autoCapture ? "#2a5a2a" : "#442222"}`,
+            borderRadius: 6,
+            color: autoCapture ? "#5c5" : "#e55",
+            padding: "4px 10px",
+            cursor: "pointer",
+            fontSize: 11,
+            fontWeight: 600,
+            transition: "all 0.2s",
+          }}
+        >
+          {autoCapture ? "● Auto" : "○ Manual"}
+        </button>
+
+        {/* Category filter bar */}
+        {(["all", "text", "link", "code", "image"] as const).map((cat) => (
+          <button
+            key={cat}
+            onClick={() => setCategoryFilter(cat)}
+            style={{
+              background: categoryFilter === cat ? (cat === "all" ? "#1e1e30" : `${TYPE_COLORS[cat as ClipType]}22`) : "transparent",
+              border: `1px solid ${categoryFilter === cat ? (cat === "all" ? "#555" : TYPE_COLORS[cat as ClipType]) : "transparent"}`,
+              borderRadius: 6,
+              color: categoryFilter === cat ? (cat === "all" ? "#ccc" : TYPE_COLORS[cat as ClipType]) : "#555",
+              padding: "3px 8px",
+              cursor: "pointer",
+              fontSize: 11,
+              fontWeight: categoryFilter === cat ? 600 : 400,
+              transition: "all 0.15s",
+            }}
+          >
+            {cat === "all" ? "All" : TYPE_ICONS[cat as ClipType] + " " + TYPE_LABELS[cat as ClipType]}
+          </button>
+        ))}
+
 
         <div style={{ position: "relative", flex: 1, maxWidth: 320 }}>
           <input
@@ -685,6 +803,10 @@ function App() {
                 onStartDrag={startDrag}
                 onContextMenu={handleContextMenu}
                 onToggleExpand={handleToggleExpand}
+                onPin={pinClip}
+                onCopy={copyToClipboard}
+                onRemove={removeWithAnim}
+                onExport={handleExportClip}
               />
             ))}
           </div>

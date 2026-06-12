@@ -119,6 +119,8 @@ interface UndoEntry {
 
 interface ClipContextValue {
   clips: Clip[];
+  autoCapture: boolean;
+  setAutoCapture: (v: boolean) => void;
   addClip: (content: string, x?: number, y?: number) => void;
   removeClip: (id: string) => void;
   moveClip: (id: string, x: number, y: number) => void;
@@ -135,6 +137,14 @@ const ClipContext = createContext<ClipContextValue | null>(null);
 
 export function ClipProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(clipReducer, { clips: loadFromStorage() });
+  const [autoCapture, setAutoCapture] = useState(() => {
+    return localStorage.getItem("clipboard-canvas-auto-capture") !== "false";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("clipboard-canvas-auto-capture", String(autoCapture));
+  }, [autoCapture]);
+
 
   // Undo/redo stacks
   const undoStack = useRef<UndoEntry[]>([]);
@@ -215,6 +225,8 @@ export function ClipProvider({ children }: { children: ReactNode }) {
     <ClipContext.Provider
       value={{
         clips: state.clips,
+        autoCapture,
+        setAutoCapture,
         addClip,
         removeClip,
         moveClip,
