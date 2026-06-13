@@ -95,7 +95,6 @@ const ClipCard = memo(function ClipCard({
   onExport,
 }: ClipCardProps) {
   const color = TYPE_COLORS[clip.type];
-  const color = TYPE_COLORS[clip.type];
   const maxPreview = clip.expanded ? 2000 : 140;
   const previewContent = clip.content.slice(0, maxPreview);
   const hasMore = clip.content.length > maxPreview;
@@ -362,7 +361,6 @@ function App() {
     }
     return result;
   }, [clips, search, categoryFilter]);
-  }, [clips, search]);
 
   const stats = useMemo(() => getClipStats(clips), [clips]);
 
