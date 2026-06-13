@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { Component, type ReactNode, type ErrorInfo } from "react";
 
 type Props = { children: ReactNode };
