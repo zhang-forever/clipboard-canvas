@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useEffect, useCallback, useRef, type ReactNode } from "react";
+import { createContext, useContext, useReducer, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 
 export type ClipType = "text" | "link" | "code" | "image";
 
