@@ -1,15 +1,32 @@
-# Clipboard Canvas
+<h1 align="center">📋 Clipboard Canvas</h1>
 
-[![Tauri 2](https://img.shields.io/badge/Tauri-2.x-FFC131?logo=tauri&logoColor=white)](https://v2.tauri.app)
-[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Vite](https://img.shields.io/badge/Vite-6.x-646CFF?logo=vite&logoColor=white)](https://vitejs.dev)
+<p align="center">
+  <strong>Your clipboard history on an infinite canvas. Drag, search, pin, and organize everything you copy — all local, all private.</strong>
+</p>
 
-**Clipboard Canvas** is a desktop app that captures your clipboard history and displays it on an infinite canvas. Built with Tauri 2 and React 19.
+<p align="center">
+  <a href="https://github.com/zhang-forever/clipboard-canvas/stargazers"><img src="https://img.shields.io/github/stars/zhang-forever/clipboard-canvas?style=social" alt="GitHub stars"></a>
+  <a href="https://github.com/zhang-forever/clipboard-canvas/network"><img src="https://img.shields.io/github/forks/zhang-forever/clipboard-canvas?style=social" alt="GitHub forks"></a>
+  <a href="https://github.com/zhang-forever/clipboard-canvas/issues"><img src="https://img.shields.io/github/issues/zhang-forever/clipboard-canvas" alt="GitHub issues"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/zhang-forever/clipboard-canvas" alt="License"></a>
+  <br>
+  <a href="https://v2.tauri.app"><img src="https://img.shields.io/badge/Tauri-2.x-FFC131?logo=tauri&logoColor=white" alt="Tauri 2"></a>
+  <a href="https://react.dev"><img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React"></a>
+  <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white" alt="TypeScript"></a>
+  <a href="https://vitejs.dev"><img src="https://img.shields.io/badge/Vite-6.x-646CFF?logo=vite&logoColor=white" alt="Vite"></a>
+</p>
 
-## Screenshots
+<p align="center">
+  <a href="#features">Features</a> · <a href="#getting-started">Getting Started</a> · <a href="#keyboard-shortcuts">Shortcuts</a> · <a href="#privacy">Privacy</a>
+</p>
 
-> Infinite canvas with draggable clip cards, minimap, and dark-themed UI. Toggle between canvas and grid view.
+## Why Clipboard Canvas?
+
+Most clipboard managers show a boring list. **Clipboard Canvas** turns your copy history into a visual, spatial workspace — drag clips around an infinite canvas, organize by position, and find anything instantly with search. Built with Tauri 2 for a tiny footprint and native performance. All data stays on your machine.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/zhang-forever/clipboard-canvas/main/docs/screenshot.png" alt="Clipboard Canvas — Infinite canvas with color-coded clip cards" width="800">
+</p>
 
 ## Features
 
